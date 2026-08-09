@@ -15,7 +15,7 @@ API de Windows relacionada a captura de input. Solo hidapi hablando
 directo con el dispositivo, igual que ya hacíamos para mandar los colores.
 
 El mapa KEY_MATRIX de abajo se construyó a mano, tecla por tecla, con
-capturas reales — no es una tabla de
+capturas reales (ver conversación de desarrollo) — no es una tabla de
 scan codes estándar, es específica de este teclado y este firmware.
 """
 import hid
@@ -159,7 +159,7 @@ class TUFK3Driver:
     def __init__(self):
         self.vendor_id = 0x0B05  # ASUS VID
         self.fps = 30
-        self.fade_duration = 2.0  # Segundos que tarda en volver a blanco
+        self.fade_duration = 1.0  # Segundos que tarda en volver a blanco
 
         # Estado en memoria de la matriz (Base: Blanco 255, 255, 255)
         self.colors = {led_id: [255, 255, 255] for led_id in ASUS_VLEDS}
@@ -243,8 +243,12 @@ class TUFK3Driver:
         for i in range(0, len(led_items), 15):
             chunk = led_items[i:i + 15]
 
-            # La cabecera exacta de escritura capturada en Wireshark
-            packet = [0xC0, 0x81, 0x36, 0x00]
+            # Cabecera: 0xC0, 0x81 fijos + cantidad REAL de LEDs de este
+            # paquete puntual (hasta 15) — confirmado contra la implementación
+            # real de OpenRGB (AsusAuraTUFKeyboardController.cpp, UpdateLeds).
+            # Antes iba un valor fijo (0x36) que no reflejaba la cantidad
+            # real por paquete.
+            packet = [0xC0, 0x81, len(chunk), 0x00]
 
             for led_id, rgb in chunk:
                 packet.extend([led_id, int(rgb[0]), int(rgb[1]), int(rgb[2])])
