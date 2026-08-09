@@ -122,5 +122,4 @@ Dicho esto, **ningún método por software puede garantizar riesgo cero frente a
 - Si Armoury Crate o SignalRGB están corriendo, van a competir por las mismas interfaces HID y el driver va a fallar al conectar.
 
 ## Licencia
-
-_(agregar la licencia que prefieras — MIT es una opción común para proyectos de este tipo)_
+Este proyecto es de código abierto bajo la licencia MIT. Podés usarlo, modificarlo y distribuirlo libremente, siempre que mantengas el aviso de copyright y la licencia en cualquier copia o derivado del software. No se ofrece ninguna garantía, y el autor no se hace responsable de daños o problemas que puedan surgir del uso de este software.
