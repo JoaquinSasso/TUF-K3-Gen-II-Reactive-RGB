@@ -147,6 +147,6 @@ Este proyecto está bajo la licencia MIT. Ver [LICENSE](LICENSE) para el texto c
 **Joaquín Sasso**  
 Estudiante de Ciencias de la Computación (UNSJ)
 
-- **LinkedIn:** [linkedin.com/in/joaquinsasso](https://www.linkedin.com/in/joasasso/)
+- **LinkedIn:** [linkedin.com/in/joasasso](https://www.linkedin.com/in/joasasso/)
 - **GitHub:** [@JoaquinSasso](https://github.com/JoaquinSasso)
 - **MiniToolbox en Play Store:** [5,0/5 con 23 reseñas](https://play.google.com/store/apps/details?id=com.joasasso.minitoolbox)
