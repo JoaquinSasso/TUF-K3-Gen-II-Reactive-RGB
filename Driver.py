@@ -154,6 +154,13 @@ KEY_MATRIX = {
     (15, 2): 148,  # numpad enter
 }
 
+# LEDs de control de brillo con Fn
+ARROW_UP_LED = 116      # flecha arriba
+ARROW_DOWN_LED = 117    # flecha abajo
+
+# Rango de brillo (0.0 = apagado, 1.0 = brillo máximo), en saltos de 20%
+BRIGHTNESS_STEP = 0.2
+
 
 class TUFK3Driver:
     def __init__(self):
@@ -164,6 +171,8 @@ class TUFK3Driver:
         # Estado en memoria de la matriz (Base: Blanco 255, 255, 255)
         self.colors = {led_id: [255, 255, 255] for led_id in ASUS_VLEDS}
         self.active_fades = {}  # {led_id: start_timestamp}
+        self.fn_held = False  # Estado actual de Fn
+        self.brightness_level = 1.0  # Control de brillo global con Fn+Flechas (0.0 a 1.0)
 
         self.rgb_device, self.key_device = self._connect_device()
         self.running = True
@@ -228,10 +237,29 @@ class TUFK3Driver:
                     if data[i] != prev[i]:
                         for bit in range(8):
                             mask = 1 << bit
+                            # Flanco de subida: tecla presionada
                             if (data[i] & mask) and not (prev[i] & mask):
                                 led_id = KEY_MATRIX.get((i, bit))
                                 if led_id is not None:
-                                    self._light_led(led_id)
+                                    # Detectar Fn (LED 85, coordenada (3, 0))
+                                    if led_id == 85:
+                                        self.fn_held = True
+                                    # Fn + Flecha Arriba: aumentar brillo
+                                    elif self.fn_held and led_id == ARROW_UP_LED:
+                                        self.brightness_level = min(1.0, self.brightness_level + BRIGHTNESS_STEP)
+                                        print(f"Brillo: {int(self.brightness_level * 100)}%")
+                                    # Fn + Flecha Abajo: disminuir brillo
+                                    elif self.fn_held and led_id == ARROW_DOWN_LED:
+                                        self.brightness_level = max(0.0, self.brightness_level - BRIGHTNESS_STEP)
+                                        print(f"Brillo: {int(self.brightness_level * 100)}%")
+                                    # Teclas normales: efecto reactivo
+                                    else:
+                                        self._light_led(led_id)
+                            # Flanco de bajada: tecla soltada
+                            elif not (data[i] & mask) and (prev[i] & mask):
+                                led_id = KEY_MATRIX.get((i, bit))
+                                if led_id == 85:
+                                    self.fn_held = False
                 prev = data
 
             time.sleep(0.005)
@@ -273,12 +301,14 @@ class TUFK3Driver:
                 elapsed = current_time - start_time
 
                 if elapsed >= self.fade_duration:
-                    self.colors[led_id] = [255, 255, 255]
+                    # Reposo en blanco, afectado por brightness_level
+                    white = int(255 * self.brightness_level)
+                    self.colors[led_id] = [white, white, white]
                     to_remove.append(led_id)
                 else:
                     progress = elapsed / self.fade_duration
                     ease_in_progress = progress ** 3
-                    val = int(255 * ease_in_progress)
+                    val = int(255 * ease_in_progress * self.brightness_level)
                     self.colors[led_id] = [val, val, val]
 
             for led_id in to_remove:

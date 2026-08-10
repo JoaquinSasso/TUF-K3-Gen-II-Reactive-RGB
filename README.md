@@ -10,6 +10,7 @@ Driver liviano en Python para el teclado ASUS TUF K3 Gen II, construido por inge
 - **Sin colisiones entre numérico y Flechas/Insertar/Suprimir/Re Pág/Av Pág**: pese a que estas teclas comparten *scan code* a nivel de SO, el protocolo propietario del teclado las distingue sin ambigüedad.
 - **Detección de combos con Fn**: Fn se lee como una tecla más del mapa, así que un combo físico como Fn + Numpad 9 ilumina ambas teclas reales en simultáneo, no la función que el combo simula.
 - **Sin interfaz gráfica**: pensado para correr como proceso de fondo silencioso.
+- **Control de brillo con Fn**: presiona Fn + Flecha Arriba/Abajo para ajustar el brillo global en saltos de 20% (0–100%).
 
 ## Instalación
 
@@ -68,6 +69,18 @@ Cada reporte de esta interfaz llega con `Report ID = 3` y una estructura tipo bi
 2. **Hilo de lectura de teclas**: en un hilo aparte, se lee continuamente el reporte de la interfaz `0xFFC0`. Por cada bit que pasa de 0 a 1 (flanco de subida), se busca la coordenada en `KEY_MATRIX` y se dispara el apagado del LED correspondiente.
 3. **Bucle de renderizado** (30 FPS, hilo principal): para cada LED con un fundido activo, se calcula el brillo con una curva ease-in cúbica (`brillo = 255 · progreso³`) y se reconstruye el paquete completo de la matriz para enviarlo por la interfaz de escritura.
 4. **Sin estado persistente entre teclas**: cada apagado reinicia el timer de fundido de ese LED puntual; el resto de la matriz sigue su propio curso de forma independiente.
+5. **Control de brillo dinámico** (Fn + Flechas): Fn sostenida + Flecha Arriba incrementa el brillo en 20% por toque (máx. 100%), Fn + Flecha Abajo lo reduce en 20% (mín. 0%). El brillo afecta tanto el reposo en blanco como la interpolación del fundido. Cada cambio se imprime en consola.
+
+## Control de Brillo
+
+Con la tecla Fn sostenida:
+
+- **Fn + Flecha Arriba**: incrementa el brillo en 20% (saltos: 0%, 20%, 40%, 60%, 80%, 100%)
+- **Fn + Flecha Abajo**: reduce el brillo en 20% (saltos inversos)
+
+El brillo es global — afecta tanto al reposo en blanco como a la velocidad de fundido de las teclas reactivas. El valor actual se imprime en la consola cada vez que cambias (`Brillo: 60%`).
+
+Caso de uso: si quieres una iluminación más sutil mientras juegas, baja el brillo al 20–40%; si quieres máximo impacto visual, déjalo al 100%.
 
 ## Ingeniería Inversa del Protocolo
 
