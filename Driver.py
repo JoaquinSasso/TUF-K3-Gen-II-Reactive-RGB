@@ -168,6 +168,7 @@ class TUFK3Driver:
         self.fps = 30
         self.fade_duration = 1.0  # Segundos que tarda en volver a blanco
 
+        self.lock = threading.Lock()
         # Estado en memoria de la matriz (Base: Blanco 255, 255, 255)
         self.colors = {led_id: [255, 255, 255] for led_id in ASUS_VLEDS}
         self.active_fades = {}  # {led_id: start_timestamp}
@@ -211,8 +212,29 @@ class TUFK3Driver:
 
     def _light_led(self, led_id):
         """Apaga un LED y arranca su fundido a blanco."""
-        self.colors[led_id] = [0, 0, 0]
-        self.active_fades[led_id] = time.time()
+        with self.lock:
+            self.colors[led_id] = [0, 0, 0]
+            self.active_fades[led_id] = time.time()
+
+    def _set_brightness(self, new_level):
+        """Actualiza el nivel de brillo, aplica el cambio a LEDs en reposo y manda frames inmediatamente para anular el modo hardware."""
+        with self.lock:
+            self.brightness_level = max(0.0, min(1.0, round(new_level, 2)))
+            white = int(255 * self.brightness_level)
+            for led_id in ASUS_VLEDS:
+                if led_id not in self.active_fades:
+                    self.colors[led_id] = [white, white, white]
+            self._send_frames_locked()
+
+        # Ráfaga rápida de frames (a los 3ms, 6ms y 9ms) para sobreescribir de inmediato
+        # cualquier cambio de modo que intente hacer el firmware del teclado por hardware
+        def burst():
+            for _ in range(3):
+                time.sleep(0.003)
+                with self.lock:
+                    self._send_frames_locked()
+
+        threading.Thread(target=burst, daemon=True).start()
 
     def _key_watcher_loop(self):
         """Único hilo de detección de teclas: lee el reporte bitmap de la
@@ -244,13 +266,16 @@ class TUFK3Driver:
                                     # Detectar Fn (LED 85, coordenada (3, 0))
                                     if led_id == 85:
                                         self.fn_held = True
+                                        self._light_led(led_id)
                                     # Fn + Flecha Arriba: aumentar brillo
                                     elif self.fn_held and led_id == ARROW_UP_LED:
-                                        self.brightness_level = min(1.0, self.brightness_level + BRIGHTNESS_STEP)
+                                        self._set_brightness(self.brightness_level + BRIGHTNESS_STEP)
+                                        self._light_led(led_id)
                                         print(f"Brillo: {int(self.brightness_level * 100)}%")
                                     # Fn + Flecha Abajo: disminuir brillo
                                     elif self.fn_held and led_id == ARROW_DOWN_LED:
-                                        self.brightness_level = max(0.0, self.brightness_level - BRIGHTNESS_STEP)
+                                        self._set_brightness(self.brightness_level - BRIGHTNESS_STEP)
+                                        self._light_led(led_id)
                                         print(f"Brillo: {int(self.brightness_level * 100)}%")
                                     # Teclas normales: efecto reactivo
                                     else:
@@ -265,63 +290,77 @@ class TUFK3Driver:
             time.sleep(0.005)
 
     def _send_frames(self):
+        with self.lock:
+            self._send_frames_locked()
+
+    def _send_frames_locked(self):
+        if self.rgb_device is None:
+            return
         led_items = list(self.colors.items())
 
         # Trocear la matriz completa en bloques de 15 LEDs para respetar el límite USB
         for i in range(0, len(led_items), 15):
             chunk = led_items[i:i + 15]
 
-            # Cabecera: 0xC0, 0x81 fijos + cantidad REAL de LEDs de este
-            # paquete puntual (hasta 15) — confirmado contra la implementación
-            # real de OpenRGB (AsusAuraTUFKeyboardController.cpp, UpdateLeds).
-            # Antes iba un valor fijo (0x36) que no reflejaba la cantidad
-            # real por paquete.
+            # Cabecera: 0xC0, 0x81 fijos + cantidad REAL de LEDs de este paquete
             packet = [0xC0, 0x81, len(chunk), 0x00]
 
             for led_id, rgb in chunk:
                 packet.extend([led_id, int(rgb[0]), int(rgb[1]), int(rgb[2])])
 
             # Rellenar con un ID de LED falso (0xFF) y colores en cero
-            # para evitar sobreescribir la tecla ESC (ID 0x00)
             while len(packet) < 64:
                 packet.extend([0xFF, 0x00, 0x00, 0x00])
 
             # Truncar por seguridad para asegurar exactamente los 64 bytes
             packet = packet[:64]
 
-            self.rgb_device.write([0x00] + packet)
+            try:
+                self.rgb_device.write([0x00] + packet)
+            except OSError:
+                pass
 
     def render_loop(self):
         print("Driver iniciado. Matriz en ejecución (Ctrl+C para salir).")
         while self.running:
             current_time = time.time()
             to_remove = []
+            white = int(255 * self.brightness_level)
 
-            for led_id, start_time in self.active_fades.items():
-                elapsed = current_time - start_time
+            with self.lock:
+                # Actualizar LEDs que no están en fade con el nivel de brillo actual
+                for led_id in ASUS_VLEDS:
+                    if led_id not in self.active_fades:
+                        self.colors[led_id] = [white, white, white]
 
-                if elapsed >= self.fade_duration:
-                    # Reposo en blanco, afectado por brightness_level
-                    white = int(255 * self.brightness_level)
-                    self.colors[led_id] = [white, white, white]
-                    to_remove.append(led_id)
-                else:
-                    progress = elapsed / self.fade_duration
-                    ease_in_progress = progress ** 3
-                    val = int(255 * ease_in_progress * self.brightness_level)
-                    self.colors[led_id] = [val, val, val]
+                for led_id, start_time in list(self.active_fades.items()):
+                    elapsed = current_time - start_time
 
-            for led_id in to_remove:
-                del self.active_fades[led_id]
+                    if elapsed >= self.fade_duration:
+                        self.colors[led_id] = [white, white, white]
+                        to_remove.append(led_id)
+                    else:
+                        progress = elapsed / self.fade_duration
+                        ease_in_progress = progress ** 3
+                        val = int(255 * ease_in_progress * self.brightness_level)
+                        self.colors[led_id] = [val, val, val]
 
-            self._send_frames()
+                for led_id in to_remove:
+                    del self.active_fades[led_id]
+
+                self._send_frames_locked()
+
             time.sleep(1.0 / self.fps)
 
     def stop(self):
         self.running = False
-        self.rgb_device.close()
-        if self.key_device is not None:
-            self.key_device.close()
+        with self.lock:
+            if self.rgb_device is not None:
+                self.rgb_device.close()
+                self.rgb_device = None
+            if self.key_device is not None:
+                self.key_device.close()
+                self.key_device = None
 
 
 if __name__ == '__main__':
